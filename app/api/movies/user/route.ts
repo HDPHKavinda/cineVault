@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
         const runtime = details?.runtime || details?.episode_run_time?.[0] || null;
 
         const inserted = await sql`
-          INSERT INTO movies (tmdb_id, title, year, genre, genre_text, type, rating, director, cast, plot, runtime, poster_url, backdrop_url)
+          INSERT INTO movies (tmdb_id, title, year, genre, genre_text, type, rating, director, cast_members, plot, runtime, poster_url, backdrop_url)
           VALUES (
             ${tmdb_id},
             ${title || details?.title || details?.name || ''},
@@ -141,7 +141,7 @@ export async function POST(request: NextRequest) {
         movieId = existing[0].id;
       } else {
         const inserted = await sql`
-          INSERT INTO movies (title, year, genre, genre_text, type, rating, director, cast, plot, runtime, poster_url)
+          INSERT INTO movies (title, year, genre, genre_text, type, rating, director, cast_members, plot, runtime, poster_url)
           VALUES (${title}, ${year || null}, ${genreText ? [genreText] : []}, ${genreText}, ${type || 'movie'}, ${movieRating || null}, ${director || null}, ${Array.isArray(cast) ? cast : []}, ${plot || null}, ${runtime || null}, ${poster_url || null})
           RETURNING id
         `;

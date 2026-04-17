@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
       seriesId = existing[0].id;
     } else {
       const inserted = await sql`
-        INSERT INTO tv_series (title, year, genre, genre_text, rating, director, cast, plot)
+        INSERT INTO tv_series (title, year, genre, genre_text, rating, director, cast_members, plot)
         VALUES (${title}, ${year || null}, ${genreText ? [genreText] : []}, ${genreText}, ${rating || null}, ${director || null}, ${castArr}, ${plot || null})
         RETURNING id
       `;
