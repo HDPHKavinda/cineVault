@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 
+const TMDB = 'https://api.themoviedb.org/3';
+const IMG = 'https://image.tmdb.org/t/p';
+
+const GENRE_MAP: Record<number, string> = {
+  28: 'Action', 12: 'Adventure', 16: 'Animation', 35: 'Comedy', 80: 'Crime',
+  99: 'Documentary', 18: 'Drama', 10751: 'Family', 14: 'Fantasy', 36: 'History',
+  27: 'Horror', 10402: 'Music', 9648: 'Mystery', 10749: 'Romance',
+  878: 'Sci-Fi', 10770: 'TV Movie', 53: 'Thriller', 10752: 'War', 37: 'Western',
+  10759: 'Action & Adventure', 10762: 'Kids', 10763: 'News', 10764: 'Reality',
+  10765: 'Sci-Fi & Fantasy', 10766: 'Soap', 10767: 'Talk', 10768: 'War & Politics',
+};
+
 export async function GET(request: NextRequest) {
   const token = request.headers.get('authorization')?.replace('Bearer ', '');
   if (!token || !verifyToken(token)) {
@@ -9,65 +21,45 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const query = searchParams.get('q');
-  if (!query?.trim()) {
-    return NextResponse.json({ error: 'Query required' }, { status: 400 });
-  }
+  if (!query?.trim()) return NextResponse.json({ error: 'Query required' }, { status: 400 });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ error: 'Anthropic API key not configured. Add ANTHROPIC_API_KEY to your environment variables.' }, { status: 500 });
-  }
+  const key = process.env.TMDB_API_KEY;
+  if (!key) return NextResponse.json({ error: 'TMDB API key not configured' }, { status: 500 });
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2048,
-        system: 'You are a movie database assistant. Always respond with ONLY a valid JSON array — no markdown, no explanation, no code blocks. Return accurate real movie/TV data.',
-        messages: [{
-          role: 'user',
-          content: `Search for movies and TV shows matching: "${query}". Return a JSON array of exactly up to 6 results. Each object must have these exact fields:
-- title: string
-- year: number (release year)
-- type: "movie" or "tv"
-- genre: string (primary genre)
-- rating: number (1.0-10.0 IMDb-style)
-- director: string
-- cast: array of exactly 3 strings (top cast members)
-- plot: string (2-3 sentence summary)
-- runtime: number (minutes; for TV use average episode length)
-- posterSearch: string (descriptive Google image search query to find the official poster, e.g. "Inception 2010 movie official poster")
+    const res = await fetch(
+      `${TMDB}/search/multi?api_key=${key}&query=${encodeURIComponent(query)}&include_adult=false&page=1`,
+      { next: { revalidate: 0 } }
+    );
 
-Return ONLY the JSON array. No other text.`,
-        }],
-      }),
-    });
+    if (!res.ok) return NextResponse.json({ error: 'TMDB search failed' }, { status: 502 });
 
-    if (!response.ok) {
-      const err = await response.text();
-      console.error('Anthropic API error:', err);
-      return NextResponse.json({ error: 'AI search failed. Check your ANTHROPIC_API_KEY.' }, { status: 500 });
-    }
+    const data = await res.json();
+    const results = (data.results || [])
+      .filter((r: any) => r.media_type === 'movie' || r.media_type === 'tv')
+      .slice(0, 12)
+      .map((r: any) => {
+        const isTV = r.media_type === 'tv';
+        const genres = (r.genre_ids || []).map((id: number) => GENRE_MAP[id]).filter(Boolean);
+        return {
+          tmdb_id: r.id,
+          title: isTV ? r.name : r.title,
+          year: isTV
+            ? (r.first_air_date ? new Date(r.first_air_date).getFullYear() : null)
+            : (r.release_date ? new Date(r.release_date).getFullYear() : null),
+          type: isTV ? 'tv' : 'movie',
+          genre: genres[0] || 'Unknown',
+          genres,
+          rating: r.vote_average ? Math.round(r.vote_average * 10) / 10 : 0,
+          plot: r.overview || '',
+          poster_url: r.poster_path ? `${IMG}/w500${r.poster_path}` : null,
+          backdrop_url: r.backdrop_path ? `${IMG}/w1280${r.backdrop_path}` : null,
+          popularity: r.popularity || 0,
+        };
+      })
+      .sort((a: any, b: any) => b.popularity - a.popularity);
 
-    const data = await response.json();
-    const content = data.content?.[0]?.text || '[]';
-
-    let results;
-    try {
-      const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-      results = JSON.parse(cleaned);
-      if (!Array.isArray(results)) results = [];
-    } catch {
-      results = [];
-    }
-
-    return NextResponse.json({ results: results.slice(0, 6) });
+    return NextResponse.json({ results });
   } catch (error) {
     console.error('Search error:', error);
     return NextResponse.json({ error: 'Search failed' }, { status: 500 });
