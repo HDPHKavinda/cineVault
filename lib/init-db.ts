@@ -20,10 +20,12 @@ export async function ensureSchema() {
   await sql`
     CREATE TABLE IF NOT EXISTS movies (
       id SERIAL PRIMARY KEY,
-      tmdb_id INTEGER UNIQUE,
+      tmdb_id INTEGER,
       title VARCHAR(500) NOT NULL,
       year INTEGER,
       genre TEXT[],
+      genre_text VARCHAR(255),
+      type VARCHAR(20) DEFAULT 'movie',
       rating DECIMAL(3,1),
       director VARCHAR(255),
       cast TEXT[],
@@ -35,6 +37,8 @@ export async function ensureSchema() {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `;
+  await sql`ALTER TABLE movies ADD COLUMN IF NOT EXISTS genre_text VARCHAR(255)`;
+  await sql`ALTER TABLE movies ADD COLUMN IF NOT EXISTS type VARCHAR(20) DEFAULT 'movie'`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS user_movies (
@@ -53,10 +57,11 @@ export async function ensureSchema() {
   await sql`
     CREATE TABLE IF NOT EXISTS tv_series (
       id SERIAL PRIMARY KEY,
-      tmdb_id INTEGER UNIQUE,
+      tmdb_id INTEGER,
       title VARCHAR(500) NOT NULL,
       year INTEGER,
       genre TEXT[],
+      genre_text VARCHAR(255),
       rating DECIMAL(3,1),
       director VARCHAR(255),
       cast TEXT[],
@@ -69,6 +74,7 @@ export async function ensureSchema() {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `;
+  await sql`ALTER TABLE tv_series ADD COLUMN IF NOT EXISTS genre_text VARCHAR(255)`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS user_tv_series (

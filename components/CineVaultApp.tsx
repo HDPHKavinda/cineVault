@@ -1,7 +1,6 @@
 'use client';
-
 import { useState, useEffect } from 'react';
-import { Film, Search, Heart, Clock, List, User, Settings, Moon, Sun, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Compass, Clock, Bookmark, Heart, Tv, List, User, Settings, Menu, X, LogOut } from 'lucide-react';
 import Auth from '@/components/Auth';
 import Dashboard from '@/components/Dashboard';
 import Discover from '@/components/Discover';
@@ -14,58 +13,50 @@ import Profile from '@/components/Profile';
 import SettingsPage from '@/components/SettingsPage';
 
 type Page = 'dashboard' | 'discover' | 'watched' | 'watchlist' | 'favorites' | 'tv' | 'lists' | 'profile' | 'settings';
+interface CvUser { id: number; email: string; name?: string; avatar_url?: string; }
 
-interface User {
-  id: number;
-  email: string;
-  name?: string;
-  avatar_url?: string;
-}
+const NAV = [
+  { section: 'Main', items: [
+    { id: 'dashboard' as Page, label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'discover' as Page, label: 'Discover', icon: Compass },
+  ]},
+  { section: 'Library', items: [
+    { id: 'watched' as Page, label: 'Watched', icon: Clock },
+    { id: 'watchlist' as Page, label: 'Watchlist', icon: Bookmark },
+    { id: 'favorites' as Page, label: 'Favorites', icon: Heart },
+    { id: 'tv' as Page, label: 'TV Series', icon: Tv },
+  ]},
+  { section: 'Organize', items: [
+    { id: 'lists' as Page, label: 'My Lists', icon: List },
+  ]},
+  { section: 'Account', items: [
+    { id: 'profile' as Page, label: 'Profile', icon: User },
+    { id: 'settings' as Page, label: 'Settings', icon: Settings },
+  ]},
+];
 
 export default function CineVaultApp() {
-  const [currentPage, setCurrentPage] = useState<Page>('dashboard');
-  const [user, setUser] = useState<User | null>(null);
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [page, setPage] = useState<Page>('dashboard');
+  const [user, setUser] = useState<CvUser | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check for existing auth token
     const token = localStorage.getItem('authToken');
-    if (token) {
-      // Validate token and set user
-      validateToken(token);
-    } else {
-      setLoading(false);
-    }
-
-    // Load theme preference
-    const savedTheme = localStorage.getItem('theme') as 'dark' | 'light' || 'dark';
-    setTheme(savedTheme);
-    document.documentElement.setAttribute('data-theme', savedTheme);
+    if (token) validateToken(token);
+    else setLoading(false);
   }, []);
 
   const validateToken = async (token: string) => {
     try {
-      // In a real app, you'd validate the token with your backend
-      const response = await fetch('/api/auth/validate', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (response.ok) {
-        const userData = await response.json();
-        setUser(userData.user);
-      } else {
-        localStorage.removeItem('authToken');
-      }
-    } catch (error) {
-      console.error('Token validation failed:', error);
-      localStorage.removeItem('authToken');
-    }
+      const res = await fetch('/api/auth/validate', { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) setUser((await res.json()).user);
+      else localStorage.removeItem('authToken');
+    } catch { localStorage.removeItem('authToken'); }
     setLoading(false);
   };
 
-  const handleLogin = (userData: User, token: string) => {
+  const handleLogin = (userData: CvUser, token: string) => {
     setUser(userData);
     localStorage.setItem('authToken', token);
   };
@@ -73,146 +64,124 @@ export default function CineVaultApp() {
   const handleLogout = () => {
     setUser(null);
     localStorage.removeItem('authToken');
+    setPage('dashboard');
   };
 
-  const toggleTheme = () => {
-    const newTheme = theme === 'dark' ? 'light' : 'dark';
-    setTheme(newTheme);
-    localStorage.setItem('theme', newTheme);
-    document.documentElement.setAttribute('data-theme', newTheme);
-  };
+  const navigate = (p: Page) => { setPage(p); setSidebarOpen(false); };
 
-  const navigation = [
-    { id: 'dashboard' as Page, label: 'Dashboard', icon: Film },
-    { id: 'discover' as Page, label: 'Discover', icon: Search },
-    { id: 'watched' as Page, label: 'Watched', icon: Clock },
-    { id: 'watchlist' as Page, label: 'Watchlist', icon: List },
-    { id: 'favorites' as Page, label: 'Favorites', icon: Heart },
-    { id: 'tv' as Page, label: 'TV Series', icon: Film },
-    { id: 'lists' as Page, label: 'My Lists', icon: List },
-    { id: 'profile' as Page, label: 'Profile', icon: User },
-    { id: 'settings' as Page, label: 'Settings', icon: Settings },
-  ];
+  const initials = (u: CvUser) => (u.name || u.email).slice(0, 2).toUpperCase();
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--background)]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--gold)]"></div>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
+        <div className="text-center">
+          <div className="text-4xl mb-4">🎬</div>
+          <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin mx-auto" style={{ borderColor: 'var(--gold)', borderTopColor: 'transparent' }} />
+        </div>
       </div>
     );
   }
 
-  if (!user) {
-    return <Auth onLogin={handleLogin} />;
-  }
+  if (!user) return <Auth onLogin={handleLogin} />;
 
   const renderPage = () => {
-    switch (currentPage) {
-      case 'dashboard':
-        return <Dashboard user={user} />;
-      case 'discover':
-        return <Discover user={user} />;
-      case 'watched':
-        return <Watched user={user} />;
-      case 'watchlist':
-        return <Watchlist user={user} />;
-      case 'favorites':
-        return <Favorites user={user} />;
-      case 'tv':
-        return <TVSeries user={user} />;
-      case 'lists':
-        return <MyLists user={user} />;
-      case 'profile':
-        return <Profile user={user} />;
-      case 'settings':
-        return <SettingsPage user={user} onLogout={handleLogout} />;
-      default:
-        return <Dashboard user={user} />;
+    const props = { user, token: localStorage.getItem('authToken') || '' };
+    switch (page) {
+      case 'dashboard': return <Dashboard {...props} />;
+      case 'discover': return <Discover {...props} />;
+      case 'watched': return <Watched {...props} />;
+      case 'watchlist': return <Watchlist {...props} />;
+      case 'favorites': return <Favorites {...props} />;
+      case 'tv': return <TVSeries {...props} />;
+      case 'lists': return <MyLists {...props} />;
+      case 'profile': return <Profile {...props} />;
+      case 'settings': return <SettingsPage {...props} onLogout={handleLogout} />;
+      default: return <Dashboard {...props} />;
     }
   };
 
-  return (
-    <div className="min-h-screen bg-[var(--background)] text-[var(--text)]">
-      {/* Mobile menu button */}
-      <button
-        onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="md:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-[var(--navy)] border border-[var(--border)]"
-      >
-        {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
-      </button>
-
-      {/* Sidebar */}
-      <div className={`fixed inset-y-0 left-0 z-40 w-64 bg-[var(--navy)] border-r border-[var(--border)] transform transition-transform duration-300 ease-in-out ${
-        sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-      } md:translate-x-0 md:static md:inset-0`}>
-        <div className="flex flex-col h-full">
-          {/* Logo */}
-          <div className="p-6 border-b border-[var(--border)]">
-            <h1 className="text-2xl font-bold text-[var(--gold)]">CineVault</h1>
-            <p className="text-sm text-[var(--text-muted)]">Web Edition</p>
-          </div>
-
-          {/* Navigation */}
-          <nav className="flex-1 px-4 py-6 space-y-2">
-            {navigation.map((item) => {
-              const Icon = item.icon;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setCurrentPage(item.id);
-                    setSidebarOpen(false);
-                  }}
-                  className={`w-full flex items-center px-4 py-3 rounded-lg transition-colors ${
-                    currentPage === item.id
-                      ? 'bg-[var(--gold)] text-[var(--navy-dark)]'
-                      : 'text-[var(--text)] hover:bg-[var(--navy-light)]'
-                  }`}
-                >
-                  <Icon size={20} className="mr-3" />
-                  {item.label}
-                </button>
-              );
-            })}
-          </nav>
-
-          {/* Theme toggle and user info */}
-          <div className="p-4 border-t border-[var(--border)]">
-            <button
-              onClick={toggleTheme}
-              className="w-full flex items-center px-4 py-3 rounded-lg text-[var(--text)] hover:bg-[var(--navy-light)] transition-colors"
-            >
-              {theme === 'dark' ? <Sun size={20} className="mr-3" /> : <Moon size={20} className="mr-3" />}
-              {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
-            </button>
-
-            <div className="mt-4 p-3 rounded-lg bg-[var(--navy-light)]">
-              <p className="text-sm font-medium">{user.name || user.email}</p>
-              <button
-                onClick={handleLogout}
-                className="text-xs text-[var(--text-muted)] hover:text-[var(--text)] mt-1"
-              >
-                Sign out
-              </button>
-            </div>
-          </div>
+  const Sidebar = () => (
+    <div className="flex flex-col h-full" style={{ background: 'var(--sidebar-bg)', borderRight: '1px solid var(--border)' }}>
+      {/* Logo */}
+      <div className="px-6 py-5 border-b flex items-center gap-3" style={{ borderColor: 'var(--border)' }}>
+        <span className="text-2xl">🎬</span>
+        <div>
+          <h1 className="text-xl font-bold leading-none">
+            Cine<span style={{ color: 'var(--gold)' }}>Vault</span>
+          </h1>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text3)' }}>Web Edition</p>
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="md:ml-64">
-        <main className="min-h-screen">
-          {renderPage()}
-        </main>
+      {/* Nav */}
+      <nav className="flex-1 px-3 py-4 overflow-y-auto">
+        {NAV.map(({ section, items }) => (
+          <div key={section} className="mb-5">
+            <p className="px-3 mb-2 text-xs font-semibold tracking-widest uppercase" style={{ color: 'var(--text3)' }}>{section}</p>
+            {items.map(({ id, label, icon: Icon }) => {
+              const active = page === id;
+              return (
+                <button key={id} onClick={() => navigate(id)}
+                  className={`nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg mb-0.5 text-sm font-medium transition-all border-l-[3px] ${active ? 'nav-active' : 'border-transparent'}`}
+                  style={{ color: active ? 'var(--gold)' : 'var(--text2)' }}>
+                  <Icon size={17} className="shrink-0" />
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+
+      {/* User footer */}
+      <div className="p-4 border-t" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'var(--bg3)' }}>
+          <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
+            style={{ background: 'var(--gold)', color: '#060d1f' }}>
+            {initials(user)}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium truncate">{user.name || 'Movie Lover'}</p>
+            <p className="text-xs truncate" style={{ color: 'var(--text3)' }}>{user.email}</p>
+          </div>
+          <button onClick={handleLogout} title="Sign out"
+            className="p-1.5 rounded-lg transition-colors hover:bg-red-500/10"
+            style={{ color: 'var(--text3)' }}>
+            <LogOut size={15} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex min-h-screen" style={{ background: 'var(--bg)' }}>
+      {/* Desktop sidebar */}
+      <div className="hidden md:block w-[232px] shrink-0 fixed inset-y-0 left-0 z-30">
+        <Sidebar />
       </div>
 
-      {/* Mobile overlay */}
+      {/* Mobile sidebar overlay */}
       {sidebarOpen && (
-        <div
-          className="md:hidden fixed inset-0 z-30 bg-black bg-opacity-50"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="md:hidden fixed inset-0 z-40 flex">
+          <div className="w-[232px] h-full">
+            <Sidebar />
+          </div>
+          <div className="flex-1 bg-black/60" onClick={() => setSidebarOpen(false)} />
+        </div>
       )}
+
+      {/* Mobile menu button */}
+      <button onClick={() => setSidebarOpen(true)}
+        className="md:hidden fixed top-4 left-4 z-30 p-2 rounded-lg border"
+        style={{ background: 'var(--bg2)', borderColor: 'var(--border)' }}>
+        <Menu size={20} />
+      </button>
+
+      {/* Main */}
+      <main className="flex-1 md:ml-[232px] min-h-screen">
+        {renderPage()}
+      </main>
     </div>
   );
 }

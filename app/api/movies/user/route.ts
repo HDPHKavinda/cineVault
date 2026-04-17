@@ -1,158 +1,125 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sql from '@/lib/db';
 import { getUserFromToken } from '@/lib/auth';
+import { ensureSchema } from '@/lib/init-db';
 
 export async function GET(request: NextRequest) {
+  await ensureSchema();
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
+    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const user = getUserFromToken(token);
-    if (!user) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
 
     const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status'); // 'watched', 'watchlist', 'favorite'
+    const status = searchParams.get('status');
+    const genre = searchParams.get('genre');
     const page = parseInt(searchParams.get('page') || '1');
-    const limit = 20;
+    const limit = 40;
     const offset = (page - 1) * limit;
 
-    let query;
-    let countQuery;
+    let movies: Record<string, any>[];
+    let countRows: Record<string, any>[];
 
     if (status) {
-      query = sql`
-        SELECT
-          m.*,
-          um.rating as user_rating,
-          um.review,
-          um.added_at,
-          um.watched_at
-        FROM movies m
-        JOIN user_movies um ON m.id = um.movie_id
-        WHERE um.user_id = ${user.id} AND um.status = ${status}
-        ORDER BY um.added_at DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `;
-
-      countQuery = sql`
-        SELECT COUNT(*) as total
-        FROM user_movies
-        WHERE user_id = ${user.id} AND status = ${status}
-      `;
+      if (genre && genre !== 'All') {
+        movies = await sql`
+          SELECT m.*, um.status, um.rating as user_rating, um.review, um.added_at, um.watched_at
+          FROM movies m JOIN user_movies um ON m.id = um.movie_id
+          WHERE um.user_id = ${user.id} AND um.status = ${status}
+            AND (m.genre::text ILIKE ${'%' + genre + '%'} OR m.genre_text ILIKE ${'%' + genre + '%'})
+          ORDER BY um.added_at DESC LIMIT ${limit} OFFSET ${offset}
+        `;
+        countRows = await sql`
+          SELECT COUNT(*) as total FROM user_movies um
+          JOIN movies m ON m.id = um.movie_id
+          WHERE um.user_id = ${user.id} AND um.status = ${status}
+            AND (m.genre::text ILIKE ${'%' + genre + '%'} OR m.genre_text ILIKE ${'%' + genre + '%'})
+        `;
+      } else {
+        movies = await sql`
+          SELECT m.*, um.status, um.rating as user_rating, um.review, um.added_at, um.watched_at
+          FROM movies m JOIN user_movies um ON m.id = um.movie_id
+          WHERE um.user_id = ${user.id} AND um.status = ${status}
+          ORDER BY um.added_at DESC LIMIT ${limit} OFFSET ${offset}
+        `;
+        countRows = await sql`
+          SELECT COUNT(*) as total FROM user_movies WHERE user_id = ${user.id} AND status = ${status}
+        `;
+      }
     } else {
-      // Get all user movies
-      query = sql`
-        SELECT
-          m.*,
-          um.status,
-          um.rating as user_rating,
-          um.review,
-          um.added_at,
-          um.watched_at
-        FROM movies m
-        JOIN user_movies um ON m.id = um.movie_id
+      movies = await sql`
+        SELECT m.*, um.status, um.rating as user_rating, um.review, um.added_at, um.watched_at
+        FROM movies m JOIN user_movies um ON m.id = um.movie_id
         WHERE um.user_id = ${user.id}
-        ORDER BY um.added_at DESC
-        LIMIT ${limit} OFFSET ${offset}
+        ORDER BY um.added_at DESC LIMIT ${limit} OFFSET ${offset}
       `;
-
-      countQuery = sql`
-        SELECT COUNT(*) as total
-        FROM user_movies
-        WHERE user_id = ${user.id}
-      `;
+      countRows = await sql`SELECT COUNT(*) as total FROM user_movies WHERE user_id = ${user.id}`;
     }
-
-    const [movies, countResult] = await Promise.all([query, countQuery]);
-    const total = countResult[0].total;
 
     return NextResponse.json({
       movies,
-      pagination: {
-        page,
-        limit,
-        total,
-        total_pages: Math.ceil(total / limit),
-      },
+      total: Number(countRows[0]?.total || 0),
+      page,
     });
   } catch (error) {
     console.error('Get user movies error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
+  await ensureSchema();
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
+    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const user = getUserFromToken(token);
-    if (!user) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
 
-    const { tmdb_id, status, rating, review } = await request.json();
+    const body = await request.json();
+    const { status, rating, review, movie_data } = body;
 
-    if (!tmdb_id || !status) {
-      return NextResponse.json(
-        { error: 'Movie ID and status are required' },
-        { status: 400 }
-      );
-    }
+    if (!status) return NextResponse.json({ error: 'Status required' }, { status: 400 });
 
-    // First, ensure the movie exists in our database
-    let movie = await sql`
-      SELECT id FROM movies WHERE tmdb_id = ${tmdb_id}
-    `;
+    let movieId: number;
 
-    if (movie.length === 0) {
-      // Fetch movie details from TMDB and insert
-      const TMDB_API_KEY = process.env.TMDB_API_KEY;
-      if (!TMDB_API_KEY) {
-        return NextResponse.json(
-          { error: 'TMDB API key not configured' },
-          { status: 500 }
-        );
-      }
+    if (movie_data) {
+      // Claude AI sourced movie
+      const { title, year, type, genre, rating: movieRating, director, cast, plot, runtime } = movie_data;
+      if (!title) return NextResponse.json({ error: 'Movie title required' }, { status: 400 });
 
-      const axios = (await import('axios')).default;
-      const response = await axios.get(`https://api.themoviedb.org/3/movie/${tmdb_id}`, {
-        params: { api_key: TMDB_API_KEY },
-      });
+      const genreText = Array.isArray(genre) ? genre.join(', ') : (genre || '');
+      const castArr = Array.isArray(cast) ? cast : [];
 
-      const movieData = response.data;
-      const insertResult = await sql`
-        INSERT INTO movies (
-          tmdb_id, title, year, genre, rating, plot, runtime,
-          poster_url, backdrop_url
-        ) VALUES (
-          ${tmdb_id},
-          ${movieData.title},
-          ${movieData.release_date ? new Date(movieData.release_date).getFullYear() : null},
-          ${movieData.genres?.map((g: any) => g.name) || []},
-          ${movieData.vote_average},
-          ${movieData.overview},
-          ${movieData.runtime},
-          ${movieData.poster_path ? `https://image.tmdb.org/t/p/w500${movieData.poster_path}` : null},
-          ${movieData.backdrop_path ? `https://image.tmdb.org/t/p/w1280${movieData.backdrop_path}` : null}
-        )
-        RETURNING id
+      const existing = await sql`
+        SELECT id FROM movies WHERE LOWER(title) = LOWER(${title}) AND year = ${year || null}
       `;
-      movie = insertResult;
+
+      if (existing.length > 0) {
+        movieId = existing[0].id;
+      } else {
+        const inserted = await sql`
+          INSERT INTO movies (title, year, genre, genre_text, rating, director, cast, plot, runtime, type)
+          VALUES (
+            ${title},
+            ${year || null},
+            ${genreText ? [genreText] : []},
+            ${genreText},
+            ${movieRating || null},
+            ${director || null},
+            ${castArr},
+            ${plot || null},
+            ${runtime || null},
+            ${type || 'movie'}
+          )
+          RETURNING id
+        `;
+        movieId = inserted[0].id;
+      }
+    } else {
+      return NextResponse.json({ error: 'movie_data required' }, { status: 400 });
     }
 
-    const movieId = movie[0]?.id || (movie as any).id;
-
-    // Add or update user movie status
     await sql`
       INSERT INTO user_movies (user_id, movie_id, status, rating, review)
       VALUES (${user.id}, ${movieId}, ${status}, ${rating || null}, ${review || null})
@@ -163,50 +130,36 @@ export async function POST(request: NextRequest) {
         watched_at = CASE WHEN EXCLUDED.status = 'watched' THEN CURRENT_TIMESTAMP ELSE user_movies.watched_at END
     `;
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, movieId });
   } catch (error) {
-    console.error('Add user movie error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Add movie error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function DELETE(request: NextRequest) {
+  await ensureSchema();
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
+    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const user = getUserFromToken(token);
-    if (!user) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
 
     const { searchParams } = new URL(request.url);
     const movieId = searchParams.get('movieId');
     const status = searchParams.get('status');
 
-    if (!movieId || !status) {
-      return NextResponse.json(
-        { error: 'Movie ID and status are required' },
-        { status: 400 }
-      );
-    }
+    if (!movieId) return NextResponse.json({ error: 'movieId required' }, { status: 400 });
 
-    await sql`
-      DELETE FROM user_movies
-      WHERE user_id = ${user.id} AND movie_id = ${movieId} AND status = ${status}
-    `;
+    if (status) {
+      await sql`DELETE FROM user_movies WHERE user_id = ${user.id} AND movie_id = ${movieId} AND status = ${status}`;
+    } else {
+      await sql`DELETE FROM user_movies WHERE user_id = ${user.id} AND movie_id = ${movieId}`;
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Delete user movie error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Delete movie error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

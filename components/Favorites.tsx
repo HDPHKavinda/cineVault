@@ -1,75 +1,109 @@
 'use client';
+import { useState, useEffect, useCallback } from 'react';
+import { Heart, Star, Trash2, Grid3X3, List } from 'lucide-react';
+import { useToast, ToastContainer } from '@/components/Toast';
 
-import { useState, useEffect } from 'react';
-import { Heart, Film, Star, Calendar } from 'lucide-react';
+interface Props { user: any; token: string; }
 
-interface User { id: number; email: string; name?: string; }
-interface Movie {
-  id: number; title: string; year: number; poster_url: string;
-  rating: number; status: string; added_at: string;
-}
-
-export default function Favorites({ user }: { user: User }) {
-  const [movies, setMovies] = useState<Movie[]>([]);
+export default function Favorites({ user, token }: Props) {
+  const [movies, setMovies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<'grid' | 'list'>('grid');
+  const { toasts, toast, dismiss } = useToast();
 
-  useEffect(() => { fetchFavorites(); }, [user.id]);
-
-  const fetchFavorites = async () => {
+  const fetchMovies = useCallback(async () => {
+    setLoading(true);
     try {
-      const token = localStorage.getItem('authToken');
-      const res = await fetch('/api/movies/user?status=favorite', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setMovies(data.movies || []);
-      }
-    } catch (e) { console.error(e); }
+      const res = await fetch('/api/movies/user?status=favorite', { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) setMovies((await res.json()).movies || []);
+    } catch { /* silent */ }
     setLoading(false);
+  }, [token]);
+
+  useEffect(() => { fetchMovies(); }, [fetchMovies]);
+
+  const remove = async (movieId: number, title: string) => {
+    await fetch(`/api/movies/user?movieId=${movieId}&status=favorite`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    toast(`${title} removed from Favorites`, 'info');
+    fetchMovies();
   };
 
-  if (loading) return <div className="p-6 text-[var(--text-muted)]">Loading...</div>;
+  const MovieCard = ({ m }: { m: any }) => (
+    <div className="movie-card rounded-xl border overflow-hidden group relative" style={{ background: 'var(--card-bg)', borderColor: 'var(--border)' }}>
+      <div className="aspect-[2/3] relative overflow-hidden" style={{ background: 'var(--bg3)' }}>
+        {m.poster_url
+          ? <img src={m.poster_url} alt={m.title} className="w-full h-full object-cover" />
+          : <div className="w-full h-full flex items-center justify-center flex-col gap-2">
+              <span className="text-4xl">{m.type === 'tv' ? '📺' : '🎬'}</span>
+              <span className="text-xs text-center px-2 line-clamp-2" style={{ color: 'var(--text3)' }}>{m.title}</span>
+            </div>}
+        <div className="absolute top-2 right-2">
+          <span className="text-lg">⭐</span>
+        </div>
+        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'rgba(6,13,31,0.85)' }}>
+          <button onClick={() => remove(m.id, m.title)} className="p-2 rounded-lg" style={{ background: 'rgba(230,57,70,0.2)', color: 'var(--red)' }}><Trash2 size={16} /></button>
+        </div>
+      </div>
+      <div className="p-3">
+        <h3 className="font-semibold text-sm truncate mb-1">{m.title}</h3>
+        <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text2)' }}>
+          <span>{m.year}</span>
+          {m.rating && <span className="flex items-center gap-0.5"><Star size={10} style={{ color: 'var(--gold)' }} />{Number(m.rating).toFixed(1)}</span>}
+          {m.genre_text && <span className="truncate">{m.genre_text}</span>}
+        </div>
+      </div>
+    </div>
+  );
+
+  const ListRow = ({ m }: { m: any }) => (
+    <div className="flex items-center gap-4 p-4 rounded-xl border group" style={{ background: 'var(--card-bg)', borderColor: 'var(--border)' }}>
+      <div className="w-12 h-16 rounded-lg overflow-hidden shrink-0 flex items-center justify-center text-2xl" style={{ background: 'var(--bg3)' }}>
+        {m.poster_url ? <img src={m.poster_url} alt={m.title} className="w-full h-full object-cover" /> : (m.type === 'tv' ? '📺' : '🎬')}
+      </div>
+      <div className="flex-1 min-w-0">
+        <h3 className="font-semibold truncate flex items-center gap-2">{m.title} <span className="text-base">⭐</span></h3>
+        <div className="flex items-center gap-2 text-xs mt-1" style={{ color: 'var(--text2)' }}>
+          <span>{m.year}</span>
+          {m.rating && <span className="flex items-center gap-0.5"><Star size={10} style={{ color: 'var(--gold)' }} />{Number(m.rating).toFixed(1)}</span>}
+          {m.genre_text && <span>{m.genre_text}</span>}
+        </div>
+      </div>
+      <button onClick={() => remove(m.id, m.title)} className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: 'var(--red)' }}><Trash2 size={14} /></button>
+    </div>
+  );
 
   return (
-    <div className="p-6">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-[var(--text)] mb-2 flex items-center">
-          <Heart className="mr-3" size={32} /> Favorites
-        </h1>
-        <p className="text-[var(--text-muted)]">Movies you love ({movies.length})</p>
+    <div className="p-6 md:p-8 animate-fade-in-up">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-3xl font-bold mb-1 flex items-center gap-2"><Heart size={28} style={{ color: '#f87171' }} /> Favorites</h1>
+          <p className="text-sm" style={{ color: 'var(--text2)' }}>{movies.length} film{movies.length !== 1 ? 's' : ''} you love</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setView('grid')} className="p-2 rounded-lg" style={{ background: view === 'grid' ? 'var(--gold)' : 'var(--bg3)', color: view === 'grid' ? '#060d1f' : 'var(--text2)' }}><Grid3X3 size={16} /></button>
+          <button onClick={() => setView('list')} className="p-2 rounded-lg" style={{ background: view === 'list' ? 'var(--gold)' : 'var(--bg3)', color: view === 'list' ? '#060d1f' : 'var(--text2)' }}><List size={16} /></button>
+        </div>
       </div>
 
-      {movies.length === 0 ? (
-        <div className="bg-[var(--card)] rounded-lg border border-[var(--border)] p-12 text-center">
-          <Heart size={48} className="mx-auto text-[var(--text-muted)] mb-4" />
-          <h3 className="text-xl font-bold text-[var(--text)] mb-2">No Favorites Yet</h3>
-          <p className="text-[var(--text-muted)]">Mark movies as favorites to see them here.</p>
+      {loading ? (
+        <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(152px, 1fr))' }}>
+          {[...Array(6)].map((_, i) => <div key={i} className="aspect-[2/3] rounded-xl animate-pulse" style={{ background: 'var(--bg3)' }} />)}
+        </div>
+      ) : movies.length === 0 ? (
+        <div className="rounded-2xl border p-12 text-center" style={{ background: 'var(--card-bg)', borderColor: 'var(--border)' }}>
+          <Heart size={48} className="mx-auto mb-3 opacity-30" />
+          <h3 className="font-semibold mb-1">No favorites yet</h3>
+          <p className="text-sm" style={{ color: 'var(--text2)' }}>Films you love will appear here.</p>
+        </div>
+      ) : view === 'grid' ? (
+        <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(152px, 1fr))' }}>
+          {movies.map(m => <MovieCard key={m.id} m={m} />)}
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          {movies.map(movie => (
-            <div key={movie.id} className="bg-[var(--card)] rounded-lg border border-[var(--border)] overflow-hidden">
-              <div className="aspect-[2/3]">
-                {movie.poster_url ? (
-                  <img src={movie.poster_url} alt={movie.title} className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full bg-[var(--navy)] flex items-center justify-center">
-                    <Film size={32} className="text-[var(--text-muted)]" />
-                  </div>
-                )}
-              </div>
-              <div className="p-3">
-                <h3 className="font-medium text-sm text-[var(--text)] truncate">{movie.title}</h3>
-                <div className="flex items-center justify-between text-xs text-[var(--text-muted)] mt-1">
-                  <span className="flex items-center"><Calendar size={11} className="mr-1" />{movie.year}</span>
-                  {movie.rating && <span className="flex items-center"><Star size={11} className="text-yellow-400 mr-1" />{Number(movie.rating).toFixed(1)}</span>}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        <div className="space-y-3">{movies.map(m => <ListRow key={m.id} m={m} />)}</div>
       )}
+
+      <ToastContainer toasts={toasts} dismiss={dismiss} />
     </div>
   );
 }
